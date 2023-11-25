@@ -1,6 +1,6 @@
 /**********************************************************************************************
 *
-*   rlgl v4.5 - A multi-OpenGL abstraction layer with an immediate-mode style API
+*   rlgl v5.0 - A multi-OpenGL abstraction layer with an immediate-mode style API
 *
 *   DESCRIPTION:
 *       An abstraction layer for multiple OpenGL versions (1.1, 2.1, 3.3 Core, 4.3 Core, ES 2.0)
@@ -59,7 +59,7 @@
 *       #define RL_CULL_DISTANCE_NEAR              0.01    // Default projection matrix near cull distance
 *       #define RL_CULL_DISTANCE_FAR             1000.0    // Default projection matrix far cull distance
 *
-*       When loading a shader, the following vertex attribute and uniform
+*       When loading a shader, the following vertex attributes and uniform
 *       location names are tried to be set automatically:
 *
 *       #define RL_DEFAULT_SHADER_ATTRIB_NAME_POSITION     "vertexPosition"    // Bound by default to shader location: 0
@@ -67,6 +67,7 @@
 *       #define RL_DEFAULT_SHADER_ATTRIB_NAME_NORMAL       "vertexNormal"      // Bound by default to shader location: 2
 *       #define RL_DEFAULT_SHADER_ATTRIB_NAME_COLOR        "vertexColor"       // Bound by default to shader location: 3
 *       #define RL_DEFAULT_SHADER_ATTRIB_NAME_TANGENT      "vertexTangent"     // Bound by default to shader location: 4
+*       #define RL_DEFAULT_SHADER_ATTRIB_NAME_TEXCOORD2    "vertexTexCoord2"   // Bound by default to shader location: 5
 *       #define RL_DEFAULT_SHADER_UNIFORM_NAME_MVP         "mvp"               // model-view-projection matrix
 *       #define RL_DEFAULT_SHADER_UNIFORM_NAME_VIEW        "matView"           // view matrix
 *       #define RL_DEFAULT_SHADER_UNIFORM_NAME_PROJECTION  "matProjection"     // projection matrix
@@ -772,6 +773,11 @@ RLAPI void rlLoadDrawQuad(void);     // Load and draw a quad
 
 #if defined(RLGL_IMPLEMENTATION)
 
+// Expose OpenGL functions from glad in raylib
+#if defined(BUILD_SHARED_LIBS)
+    #define GLAD_API_CALL_EXPORT_BUILD
+#endif
+
 #if defined(GRAPHICS_API_OPENGL_11)
     #if defined(__APPLE__)
         #include <OpenGL/gl.h>          // OpenGL 1.1 library for OSX
@@ -799,10 +805,14 @@ RLAPI void rlLoadDrawQuad(void);     // Load and draw a quad
     #define GLAD_FREE RL_FREE
 
     #define GLAD_GL_IMPLEMENTATION
-    #include "external/glad.h"      // GLAD extensions loading library, includes OpenGL headers
+    #include "external/glad.h"          // GLAD extensions loading library, includes OpenGL headers
 #endif
 
-#if defined(GRAPHICS_API_OPENGL_ES2)
+#if defined(GRAPHICS_API_OPENGL_ES3)
+    #include <GLES3/gl3.h>              // OpenGL ES 3.0 library
+    #define GL_GLEXT_PROTOTYPES
+    #include <GLES2/gl2ext.h>           // OpenGL ES 2.0 extensions library
+#elif defined(GRAPHICS_API_OPENGL_ES2)
     // NOTE: OpenGL ES 2.0 can be enabled on PLATFORM_DESKTOP,
     // in that case, functions are loaded from a custom glad for OpenGL ES 2.0
     #if defined(PLATFORM_DESKTOP) || defined(PLATFORM_DESKTOP_SDL)
@@ -822,9 +832,6 @@ RLAPI void rlLoadDrawQuad(void);     // Load and draw a quad
     typedef void (GL_APIENTRYP PFNGLDRAWELEMENTSINSTANCEDEXTPROC) (GLenum mode, GLsizei count, GLenum type, const void *indices, GLsizei primcount);
     typedef void (GL_APIENTRYP PFNGLVERTEXATTRIBDIVISOREXTPROC) (GLuint index, GLuint divisor);
     #endif
-#endif
-#if defined(GRAPHICS_API_OPENGL_ES3)
-    #include <GLES3/gl3.h>
 #endif
 
 #include <stdlib.h>                     // Required for: malloc(), free()
@@ -902,8 +909,10 @@ RLAPI void rlLoadDrawQuad(void);     // Load and draw a quad
 
 #if defined(GRAPHICS_API_OPENGL_ES2)
     #define glClearDepth                 glClearDepthf
-    #define GL_READ_FRAMEBUFFER         GL_FRAMEBUFFER
-    #define GL_DRAW_FRAMEBUFFER         GL_FRAMEBUFFER
+    #if !defined(GRAPHICS_API_OPENGL_ES3)
+        #define GL_READ_FRAMEBUFFER         GL_FRAMEBUFFER
+        #define GL_DRAW_FRAMEBUFFER         GL_FRAMEBUFFER
+    #endif
 #endif
 
 // Default shader vertex attribute names to set location points
@@ -1042,7 +1051,7 @@ typedef void *(*rlglLoadProc)(const char *name);   // OpenGL extension functions
 static rlglData RLGL = { 0 };
 #endif  // GRAPHICS_API_OPENGL_33 || GRAPHICS_API_OPENGL_ES2
 
-#if defined(GRAPHICS_API_OPENGL_ES2)
+#if defined(GRAPHICS_API_OPENGL_ES2) && !defined(GRAPHICS_API_OPENGL_ES3)
 // NOTE: VAO functionality is exposed through extensions (OES)
 static PFNGLGENVERTEXARRAYSOESPROC glGenVertexArrays = NULL;
 static PFNGLBINDVERTEXARRAYOESPROC glBindVertexArray = NULL;
@@ -1061,7 +1070,7 @@ static PFNGLVERTEXATTRIBDIVISOREXTPROC glVertexAttribDivisor = NULL;
 static void rlLoadShaderDefault(void);      // Load default shader
 static void rlUnloadShaderDefault(void);    // Unload default shader
 #if defined(RLGL_SHOW_GL_DETAILS_INFO)
-static char *rlGetCompressedFormatName(int format); // Get compressed format official GL identifier name
+static const char *rlGetCompressedFormatName(int format); // Get compressed format official GL identifier name
 #endif  // RLGL_SHOW_GL_DETAILS_INFO
 #endif  // GRAPHICS_API_OPENGL_33 || GRAPHICS_API_OPENGL_ES2
 
@@ -4686,7 +4695,7 @@ static void rlUnloadShaderDefault(void)
 
 #if defined(RLGL_SHOW_GL_DETAILS_INFO)
 // Get compressed format official GL identifier name
-static char *rlGetCompressedFormatName(int format)
+static const char *rlGetCompressedFormatName(int format)
 {
     switch (format)
     {

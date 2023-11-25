@@ -47,7 +47,7 @@ int main(void)
         //----------------------------------------------------------------------------------
         UpdateCamera(&camera, CAMERA_FREE);
 
-        if (IsKeyDown('Z')) camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
+        if (IsKeyPressed('Z')) camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
         //----------------------------------------------------------------------------------
 
         // Draw

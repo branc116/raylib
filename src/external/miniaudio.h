@@ -1,6 +1,6 @@
 /*
 Audio playback and capture library. Choice of public domain or MIT-0. See license statements at the end of this file.
-miniaudio - v0.11.19 - TBD
+miniaudio - v0.11.21 - 2023-11-15
 
 David Reid - mackron@gmail.com
 
@@ -3723,7 +3723,7 @@ extern "C" {
 
 #define MA_VERSION_MAJOR    0
 #define MA_VERSION_MINOR    11
-#define MA_VERSION_REVISION 19
+#define MA_VERSION_REVISION 21
 #define MA_VERSION_STRING   MA_XSTRINGIFY(MA_VERSION_MAJOR) "." MA_XSTRINGIFY(MA_VERSION_MINOR) "." MA_XSTRINGIFY(MA_VERSION_REVISION)
 
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -6716,7 +6716,8 @@ typedef enum
     ma_device_notification_type_stopped,
     ma_device_notification_type_rerouted,
     ma_device_notification_type_interruption_began,
-    ma_device_notification_type_interruption_ended
+    ma_device_notification_type_interruption_ended,
+    ma_device_notification_type_unlocked
 } ma_device_notification_type;
 
 typedef struct
@@ -7042,7 +7043,7 @@ struct ma_device_config
     ma_uint32 periods;
     ma_performance_profile performanceProfile;
     ma_bool8 noPreSilencedOutputBuffer; /* When set to true, the contents of the output buffer passed into the data callback will be left undefined rather than initialized to silence. */
-    ma_bool8 noClip;                    /* When set to true, the contents of the output buffer passed into the data callback will be clipped after returning. Only applies when the playback sample format is f32. */
+    ma_bool8 noClip;                    /* When set to true, the contents of the output buffer passed into the data callback will not be clipped after returning. Only applies when the playback sample format is f32. */
     ma_bool8 noDisableDenormals;        /* Do not disable denormals when firing the data callback. */
     ma_bool8 noFixedSizedCallback;      /* Disables strict fixed-sized data callbacks. Setting this to true will result in the period size being treated only as a hint to the backend. This is an optimization for those who don't need fixed sized callbacks. */
     ma_device_data_proc dataCallback;
@@ -8626,8 +8627,8 @@ then be set directly on the structure. Below are the members of the `ma_device_c
         callback will write to every sample in the output buffer, or if you are doing your own clearing.
 
     noClip
-        When set to true, the contents of the output buffer passed into the data callback will be clipped after returning. When set to false (default), the
-        contents of the output buffer are left alone after returning and it will be left up to the backend itself to decide whether or not the clip. This only
+        When set to true, the contents of the output buffer are left alone after returning and it will be left up to the backend itself to decide whether or
+        not to clip. When set to false (default), the contents of the output buffer passed into the data callback will be clipped after returning. This only
         applies when the playback sample format is f32.
 
     noDisableDenormals
@@ -17820,7 +17821,7 @@ MA_API ma_handle ma_dlopen(ma_log* pLog, const char* filename)
 
     #ifdef MA_WIN32
         /* From MSDN: Desktop applications cannot use LoadPackagedLibrary; if a desktop application calls this function it fails with APPMODEL_ERROR_NO_PACKAGE.*/
-        #if !defined(MA_WIN32_UWP)
+        #if !defined(MA_WIN32_UWP) || !(defined(WINAPI_FAMILY) && ((defined(WINAPI_FAMILY_PHONE_APP) && WINAPI_FAMILY == WINAPI_FAMILY_PHONE_APP)))
             handle = (ma_handle)LoadLibraryA(filename);
         #else
             /* *sigh* It appears there is no ANSI version of LoadPackagedLibrary()... */
@@ -18668,16 +18669,11 @@ static void ma_device__on_notification_rerouted(ma_device* pDevice)
 }
 #endif
 
-/* Interruptions are only used on some platforms. */
-#if defined(MA_APPLE_MOBILE)
-static void ma_device__on_notification_interruption_began(ma_device* pDevice)
+#if defined(MA_EMSCRIPTEN)
+EMSCRIPTEN_KEEPALIVE
+void ma_device__on_notification_unlocked(ma_device* pDevice)
 {
-    ma_device__on_notification(ma_device_notification_init(pDevice, ma_device_notification_type_interruption_began));
-}
-
-static void ma_device__on_notification_interruption_ended(ma_device* pDevice)
-{
-    ma_device__on_notification(ma_device_notification_init(pDevice, ma_device_notification_type_interruption_ended));
+    ma_device__on_notification(ma_device_notification_init(pDevice, ma_device_notification_type_unlocked));
 }
 #endif
 
@@ -23511,6 +23507,39 @@ static ma_result ma_context_init__wasapi(ma_context* pContext, const ma_context_
 
     MA_ZERO_OBJECT(&pContext->wasapi);
 
+
+    #if defined(MA_WIN32_UWP)
+    {
+        /* Link to mmdevapi so we can get access to ActivateAudioInterfaceAsync(). */
+        pContext->wasapi.hMMDevapi = ma_dlopen(ma_context_get_log(pContext), "mmdevapi.dll");
+        if (pContext->wasapi.hMMDevapi) {
+            pContext->wasapi.ActivateAudioInterfaceAsync = ma_dlsym(ma_context_get_log(pContext), pContext->wasapi.hMMDevapi, "ActivateAudioInterfaceAsync");
+            if (pContext->wasapi.ActivateAudioInterfaceAsync == NULL) {
+                ma_dlclose(ma_context_get_log(pContext), pContext->wasapi.hMMDevapi);
+                return MA_NO_BACKEND;   /* ActivateAudioInterfaceAsync() could not be loaded. */
+            }
+        } else {
+            return MA_NO_BACKEND;   /* Failed to load mmdevapi.dll which is required for ActivateAudioInterfaceAsync() */
+        }
+    }
+    #endif
+
+    /* Optionally use the Avrt API to specify the audio thread's latency sensitivity requirements */
+    pContext->wasapi.hAvrt = ma_dlopen(ma_context_get_log(pContext), "avrt.dll");
+    if (pContext->wasapi.hAvrt) {
+        pContext->wasapi.AvSetMmThreadCharacteristicsA   = ma_dlsym(ma_context_get_log(pContext), pContext->wasapi.hAvrt, "AvSetMmThreadCharacteristicsA");
+        pContext->wasapi.AvRevertMmThreadcharacteristics = ma_dlsym(ma_context_get_log(pContext), pContext->wasapi.hAvrt, "AvRevertMmThreadCharacteristics");
+
+        /* If either function could not be found, disable use of avrt entirely. */
+        if (!pContext->wasapi.AvSetMmThreadCharacteristicsA || !pContext->wasapi.AvRevertMmThreadcharacteristics) {
+            pContext->wasapi.AvSetMmThreadCharacteristicsA   = NULL;
+            pContext->wasapi.AvRevertMmThreadcharacteristics = NULL;
+            ma_dlclose(ma_context_get_log(pContext), pContext->wasapi.hAvrt);
+            pContext->wasapi.hAvrt = NULL;
+        }
+    }
+
+
     /*
     Annoyingly, WASAPI does not allow you to release an IAudioClient object from a different thread
     than the one that retrieved it with GetService(). This can result in a deadlock in two
@@ -23553,41 +23582,6 @@ static ma_result ma_context_init__wasapi(ma_context* pContext, const ma_context_
             ma_semaphore_uninit(&pContext->wasapi.commandSem);
             ma_mutex_uninit(&pContext->wasapi.commandLock);
             return result;
-        }
-
-        #if defined(MA_WIN32_UWP)
-        {
-            /* Link to mmdevapi so we can get access to ActivateAudioInterfaceAsync(). */
-            pContext->wasapi.hMMDevapi = ma_dlopen(ma_context_get_log(pContext), "mmdevapi.dll");
-            if (pContext->wasapi.hMMDevapi) {
-                pContext->wasapi.ActivateAudioInterfaceAsync = ma_dlsym(ma_context_get_log(pContext), pContext->wasapi.hMMDevapi, "ActivateAudioInterfaceAsync");
-                if (pContext->wasapi.ActivateAudioInterfaceAsync == NULL) {
-                    ma_semaphore_uninit(&pContext->wasapi.commandSem);
-                    ma_mutex_uninit(&pContext->wasapi.commandLock);
-                    ma_dlclose(ma_context_get_log(pContext), pContext->wasapi.hMMDevapi);
-                    return MA_NO_BACKEND;   /* ActivateAudioInterfaceAsync() could not be loaded. */
-                }
-            } else {
-                ma_semaphore_uninit(&pContext->wasapi.commandSem);
-                ma_mutex_uninit(&pContext->wasapi.commandLock);
-                return MA_NO_BACKEND;   /* Failed to load mmdevapi.dll which is required for ActivateAudioInterfaceAsync() */
-            }
-        }
-        #endif
-
-        /* Optionally use the Avrt API to specify the audio thread's latency sensitivity requirements */
-        pContext->wasapi.hAvrt = ma_dlopen(ma_context_get_log(pContext), "avrt.dll");
-        if (pContext->wasapi.hAvrt) {
-            pContext->wasapi.AvSetMmThreadCharacteristicsA   = ma_dlsym(ma_context_get_log(pContext), pContext->wasapi.hAvrt, "AvSetMmThreadCharacteristicsA");
-            pContext->wasapi.AvRevertMmThreadcharacteristics = ma_dlsym(ma_context_get_log(pContext), pContext->wasapi.hAvrt, "AvRevertMmThreadCharacteristics");
-
-            /* If either function could not be found, disable use of avrt entirely. */
-            if (!pContext->wasapi.AvSetMmThreadCharacteristicsA || !pContext->wasapi.AvRevertMmThreadcharacteristics) {
-                pContext->wasapi.AvSetMmThreadCharacteristicsA   = NULL;
-                pContext->wasapi.AvRevertMmThreadcharacteristics = NULL;
-                ma_dlclose(ma_context_get_log(pContext), pContext->wasapi.hAvrt);
-                pContext->wasapi.hAvrt = NULL;
-            }
         }
     }
 
@@ -31884,6 +31878,18 @@ size, allocate a block of memory of that size and then call AudioObjectGetProper
 AudioDeviceID's so just do "dataSize/sizeof(AudioDeviceID)" to know the device count.
 */
 
+#if defined(MA_APPLE_MOBILE)
+static void ma_device__on_notification_interruption_began(ma_device* pDevice)
+{
+    ma_device__on_notification(ma_device_notification_init(pDevice, ma_device_notification_type_interruption_began));
+}
+
+static void ma_device__on_notification_interruption_ended(ma_device* pDevice)
+{
+    ma_device__on_notification(ma_device_notification_init(pDevice, ma_device_notification_type_interruption_ended));
+}
+#endif
+
 static ma_result ma_result_from_OSStatus(OSStatus status)
 {
     switch (status)
@@ -32800,9 +32806,9 @@ static ma_result ma_find_best_format__coreaudio(ma_context* pContext, AudioObjec
 
     hasSupportedFormat = MA_FALSE;
     for (iFormat = 0; iFormat < deviceFormatDescriptionCount; ++iFormat) {
-        ma_format format;
-        ma_result formatResult = ma_format_from_AudioStreamBasicDescription(&pDeviceFormatDescriptions[iFormat].mFormat, &format);
-        if (formatResult == MA_SUCCESS && format != ma_format_unknown) {
+        ma_format formatFromDescription;
+        ma_result formatResult = ma_format_from_AudioStreamBasicDescription(&pDeviceFormatDescriptions[iFormat].mFormat, &formatFromDescription);
+        if (formatResult == MA_SUCCESS && formatFromDescription != ma_format_unknown) {
             hasSupportedFormat = MA_TRUE;
             bestDeviceFormatSoFar = pDeviceFormatDescriptions[iFormat].mFormat;
             break;
@@ -39803,6 +39809,7 @@ static ma_result ma_device_uninit__webaudio(ma_device* pDevice)
             */
             device.webaudio.close();
             device.webaudio = undefined;
+            device.pDevice = undefined;
         }, pDevice->webaudio.deviceIndex);
     }
     #endif
@@ -39825,6 +39832,10 @@ static ma_uint32 ma_calculate_period_size_in_frames_from_descriptor__webaudio(co
     the default buffer size, we'll make sure the period size is bigger than our standard defaults.
     */
     ma_uint32 periodSizeInFrames;
+
+    if (nativeSampleRate == 0) {
+        nativeSampleRate = MA_DEFAULT_SAMPLE_RATE;
+    }
 
     if (pDescriptor->periodSizeInFrames == 0) {
         if (pDescriptor->periodSizeInMilliseconds == 0) {
@@ -40298,6 +40309,8 @@ static ma_result ma_device_init__webaudio(ma_device* pDevice, const ma_device_co
                 device.scriptNode.connect(device.webaudio.destination);
             }
 
+            device.pDevice = pDevice;
+
             return miniaudio.track_device(device);
         }, pConfig->deviceType, channels, sampleRate, periodSizeInFrames, pDevice->webaudio.pIntermediaryBuffer, pDevice);
 
@@ -40464,14 +40477,21 @@ static ma_result ma_context_init__webaudio(ma_context* pContext, const ma_contex
             };
 
             miniaudio.unlock_event_types = (function(){
-                return ['touchstart', 'touchend', 'click'];
+                return ['touchend', 'click'];
             })();
 
             miniaudio.unlock = function() {
                 for(var i = 0; i < miniaudio.devices.length; ++i) {
                     var device = miniaudio.devices[i];
-                    if (device != null && device.webaudio != null && device.state === 2 /* ma_device_state_started */) {
-                        device.webaudio.resume();
+                    if (device != null &&
+                        device.webaudio != null &&
+                        device.state === window.miniaudio.device_state.started) {
+
+                        device.webaudio.resume().then(() => {
+                                Module._ma_device__on_notification_unlocked(device.pDevice);
+                            },
+                            (error) => {console.error("Failed to resume audiocontext", error);
+                            });
                     }
                 }
                 miniaudio.unlock_event_types.map(function(event_type) {
@@ -60158,7 +60178,7 @@ extern "C" {
 #define MA_DR_FLAC_XSTRINGIFY(x)     MA_DR_FLAC_STRINGIFY(x)
 #define MA_DR_FLAC_VERSION_MAJOR     0
 #define MA_DR_FLAC_VERSION_MINOR     12
-#define MA_DR_FLAC_VERSION_REVISION  41
+#define MA_DR_FLAC_VERSION_REVISION  42
 #define MA_DR_FLAC_VERSION_STRING    MA_DR_FLAC_XSTRINGIFY(MA_DR_FLAC_VERSION_MAJOR) "." MA_DR_FLAC_XSTRINGIFY(MA_DR_FLAC_VERSION_MINOR) "." MA_DR_FLAC_XSTRINGIFY(MA_DR_FLAC_VERSION_REVISION)
 #include <stddef.h>
 #if defined(_MSC_VER) && _MSC_VER >= 1700
@@ -60445,7 +60465,7 @@ extern "C" {
 #define MA_DR_MP3_XSTRINGIFY(x)     MA_DR_MP3_STRINGIFY(x)
 #define MA_DR_MP3_VERSION_MAJOR     0
 #define MA_DR_MP3_VERSION_MINOR     6
-#define MA_DR_MP3_VERSION_REVISION  37
+#define MA_DR_MP3_VERSION_REVISION  38
 #define MA_DR_MP3_VERSION_STRING    MA_DR_MP3_XSTRINGIFY(MA_DR_MP3_VERSION_MAJOR) "." MA_DR_MP3_XSTRINGIFY(MA_DR_MP3_VERSION_MINOR) "." MA_DR_MP3_XSTRINGIFY(MA_DR_MP3_VERSION_REVISION)
 #include <stddef.h>
 #define MA_DR_MP3_MAX_PCM_FRAMES_PER_MP3_FRAME  1152
@@ -82387,7 +82407,7 @@ static MA_INLINE ma_uint32 ma_dr_flac__swap_endian_uint32(ma_uint32 n)
     #if defined(_MSC_VER) && !defined(__clang__)
         return _byteswap_ulong(n);
     #elif defined(__GNUC__) || defined(__clang__)
-        #if defined(MA_ARM) && (defined(__ARM_ARCH) && __ARM_ARCH >= 6) && !defined(MA_64BIT)
+        #if defined(MA_ARM) && (defined(__ARM_ARCH) && __ARM_ARCH >= 6) && !defined(__ARM_ARCH_6M__) && !defined(MA_64BIT)
             ma_uint32 r;
             __asm__ __volatile__ (
             #if defined(MA_64BIT)
@@ -83128,7 +83148,7 @@ static MA_INLINE ma_uint32 ma_dr_flac__clz_lzcnt(ma_dr_flac_cache_t x)
                 );
                 return r;
             }
-        #elif defined(MA_ARM) && (defined(__ARM_ARCH) && __ARM_ARCH >= 5) && !defined(MA_64BIT)
+        #elif defined(MA_ARM) && (defined(__ARM_ARCH) && __ARM_ARCH >= 5) && !defined(__ARM_ARCH_6M__) && !defined(MA_64BIT)
             {
                 unsigned int r;
                 __asm__ __volatile__ (
@@ -85869,7 +85889,7 @@ static ma_bool32 ma_dr_flac__read_and_decode_metadata(ma_dr_flac_read_proc onRea
     for (;;) {
         ma_dr_flac_metadata metadata;
         ma_uint8 isLastBlock = 0;
-        ma_uint8 blockType;
+        ma_uint8 blockType = 0;
         ma_uint32 blockSize;
         if (ma_dr_flac__read_and_decode_block_header(onRead, pUserData, &isLastBlock, &blockType, &blockSize) == MA_FALSE) {
             return MA_FALSE;
@@ -89949,7 +89969,7 @@ static int ma_dr_mp3_have_simd(void)
 #else
 #define MA_DR_MP3_HAVE_SIMD 0
 #endif
-#if defined(__ARM_ARCH) && (__ARM_ARCH >= 6) && !defined(__aarch64__) && !defined(_M_ARM64)
+#if defined(__ARM_ARCH) && (__ARM_ARCH >= 6) && !defined(__aarch64__) && !defined(_M_ARM64) && !defined(__ARM_ARCH_6M__)
 #define MA_DR_MP3_HAVE_ARMV6 1
 static __inline__ __attribute__((always_inline)) ma_int32 ma_dr_mp3_clip_int16_arm(ma_int32 a)
 {

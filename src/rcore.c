@@ -3,22 +3,22 @@
 *   rcore - Window/display management, Graphic device/context management and input management
 *
 *   PLATFORMS SUPPORTED:
-*       - PLATFORM_DESKTOP (GLFW backend):
-*           > Windows (Win32, Win64)
-*           > Linux (X11/Wayland desktop mode)
-*           > macOS/OSX (x64, arm64)
-*           > FreeBSD, OpenBSD, NetBSD, DragonFly (X11 desktop)
-*       - PLATFORM_DESKTOP_SDL (SDL backend):
-*           > Windows (Win32, Win64)
-*           > Linux (X11/Wayland desktop mode)
-*           > Others (not tested)
-*       - PLATFORM_WEB:
-*           > HTML5 (WebAssembly)
-*       - PLATFORM_DRM:
-*           > Raspberry Pi 0-5
-*           > Linux native mode (KMS driver)
-*       - PLATFORM_ANDROID:
-*           > Android (ARM, ARM64)
+*       > PLATFORM_DESKTOP (GLFW backend):
+*           - Windows (Win32, Win64)
+*           - Linux (X11/Wayland desktop mode)
+*           - macOS/OSX (x64, arm64)
+*           - FreeBSD, OpenBSD, NetBSD, DragonFly (X11 desktop)
+*       > PLATFORM_DESKTOP_SDL (SDL backend):
+*           - Windows (Win32, Win64)
+*           - Linux (X11/Wayland desktop mode)
+*           - Others (not tested)
+*       > PLATFORM_WEB:
+*           - HTML5 (WebAssembly)
+*       > PLATFORM_DRM:
+*           - Raspberry Pi 0-5 (DRM/KMS)
+*           - Linux DRM subsystem (KMS mode)
+*       > PLATFORM_ANDROID:
+*           - Android (ARM, ARM64)
 *
 *   CONFIGURATION:
 *       #define SUPPORT_DEFAULT_FONT (default)
@@ -189,7 +189,11 @@ __declspec(dllimport) int __stdcall WideCharToMultiByte(unsigned int cp, unsigne
     #define MAX_FILEPATH_CAPACITY       8192        // Maximum capacity for filepath
 #endif
 #ifndef MAX_FILEPATH_LENGTH
-    #define MAX_FILEPATH_LENGTH         4096        // Maximum length for filepaths (Linux PATH_MAX default value)
+    #if defined(_WIN32)
+        #define MAX_FILEPATH_LENGTH      256        // On Win32, MAX_PATH = 260 (limits.h) but Windows 10, Version 1607 enables long paths...
+    #else
+        #define MAX_FILEPATH_LENGTH     4096        // On Linux, PATH_MAX = 4096 by default (limits.h)
+    #endif
 #endif
 
 #ifndef MAX_KEYBOARD_KEYS
@@ -252,6 +256,7 @@ typedef struct CoreData {
         bool shouldClose;                   // Check if window set for closing
         bool resizedLastFrame;              // Check if window has been resized last frame
         bool eventWaiting;                  // Wait for events before ending frame
+        bool usingFbo;                      // Using FBO (RenderTexture) for rendering instead of default framebuffer
 
         Point position;                     // Window position (required on fullscreen toggle)
         Point previousPosition;             // Window previous position (required on borderless windowed toggle)
@@ -653,6 +658,7 @@ void InitWindow(int width, int height, const char *title)
 #endif
 
     CORE.Time.frameCounter = 0;
+    CORE.Window.shouldClose = false;
 
     // Initialize random seed
     SetRandomSeed((unsigned int)time(NULL));
@@ -859,6 +865,10 @@ void EndDrawing(void)
     }
 #endif
 
+#if defined(SUPPORT_AUTOMATION_EVENTS)
+    if (automationEventRecording) RecordAutomationEvent();    // Event recording
+#endif
+
 #if !defined(SUPPORT_CUSTOM_FRAME_CONTROL)
     SwapScreenBuffer();                  // Copy back buffer to front buffer (screen)
 
@@ -921,10 +931,6 @@ void EndDrawing(void)
         }
     }
 #endif  // SUPPORT_SCREEN_CAPTURE
-
-#if defined(SUPPORT_AUTOMATION_EVENTS)
-    if (automationEventRecording) RecordAutomationEvent();    // Event recording
-#endif
 
     CORE.Time.frameCounter++;
 }
@@ -1035,6 +1041,7 @@ void BeginTextureMode(RenderTexture2D target)
     // calculation when using BeginMode3D()
     CORE.Window.currentFbo.width = target.texture.width;
     CORE.Window.currentFbo.height = target.texture.height;
+    CORE.Window.usingFbo = true;
 }
 
 // Ends drawing to render texture
@@ -1050,6 +1057,7 @@ void EndTextureMode(void)
     // Reset current fbo to screen size
     CORE.Window.currentFbo.width = CORE.Window.render.width;
     CORE.Window.currentFbo.height = CORE.Window.render.height;
+    CORE.Window.usingFbo = false;
 }
 
 // Begin custom shader mode
@@ -1086,19 +1094,22 @@ void BeginScissorMode(int x, int y, int width, int height)
     rlEnableScissorTest();
 
 #if defined(__APPLE__)
-    Vector2 scale = GetWindowScaleDPI();
-    rlScissor((int)(x*scale.x), (int)(GetScreenHeight()*scale.y - (((y + height)*scale.y))), (int)(width*scale.x), (int)(height*scale.y));
+    if (!CORE.Window.usingFbo)
+    {
+        Vector2 scale = GetWindowScaleDPI();
+        rlScissor((int)(x*scale.x), (int)(GetScreenHeight()*scale.y - (((y + height)*scale.y))), (int)(width*scale.x), (int)(height*scale.y));
+    }
 #else
-    if ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0)
+    if (!CORE.Window.usingFbo && ((CORE.Window.flags & FLAG_WINDOW_HIGHDPI) > 0))
     {
         Vector2 scale = GetWindowScaleDPI();
         rlScissor((int)(x*scale.x), (int)(CORE.Window.currentFbo.height - (y + height)*scale.y), (int)(width*scale.x), (int)(height*scale.y));
     }
+#endif
     else
     {
         rlScissor(x, CORE.Window.currentFbo.height - (y + height), width, height);
     }
-#endif
 }
 
 // End scissor mode
@@ -1578,8 +1589,8 @@ int GetFPS(void)
         average = 0;
         last = 0;
         index = 0;
-        for (int i = 0; i < FPS_CAPTURE_FRAMES_COUNT; i++)
-            history[i] = 0;
+
+        for (int i = 0; i < FPS_CAPTURE_FRAMES_COUNT; i++) history[i] = 0;
     }
 
     if (fpsFrame == 0) return 0;
@@ -1677,7 +1688,7 @@ void SetRandomSeed(unsigned int seed)
 #endif
 }
 
-// Get a random value between min and max (both included)
+// Get a random value between min and max included
 int GetRandomValue(int min, int max)
 {
     int value = 0;
@@ -1695,6 +1706,7 @@ int GetRandomValue(int min, int max)
     // WARNING: Ranges higher than RAND_MAX will return invalid results
     // More specifically, if (max - min) > INT_MAX there will be an overflow,
     // and otherwise if (max - min) > RAND_MAX the random value will incorrectly never exceed a certain threshold
+    // NOTE: Depending on the library it can be as low as 32767
     if ((unsigned int)(max - min) > (unsigned int)RAND_MAX)
     {
         TRACELOG(LOG_WARNING, "Invalid GetRandomValue() arguments, range should not be higher than %i", RAND_MAX);
@@ -1705,7 +1717,57 @@ int GetRandomValue(int min, int max)
     return value;
 }
 
-// Takes a screenshot of current screen (saved a .png)
+// Load random values sequence, no values repeated, min and max included
+int *LoadRandomSequence(unsigned int count, int min, int max)
+{
+    int *values = NULL;
+
+#if defined(SUPPORT_RPRAND_GENERATOR)
+    values = rprand_load_sequence(count, min, max);
+#else
+    if (count > ((unsigned int)abs(max - min) + 1)) return values;
+
+    values = (int *)RL_CALLOC(count, sizeof(int));
+
+    int value = 0;
+    bool dupValue = false;
+
+    for (int i = 0; i < (int)count;)
+    {
+        value = (rand()%(abs(max - min) + 1) + min);
+        dupValue = false;
+
+        for (int j = 0; j < i; j++)
+        {
+            if (values[j] == value)
+            {
+                dupValue = true;
+                break;
+            }
+        }
+
+        if (!dupValue)
+        {
+            values[i] = value;
+            i++;
+        }
+    }
+#endif
+    return values;
+}
+
+// Unload random values sequence
+void UnloadRandomSequence(int *sequence)
+{
+#if defined(SUPPORT_RPRAND_GENERATOR)
+    rprand_unload_sequence(sequence);
+#else
+    RL_FREE(sequence);
+#endif
+}
+
+// Takes a screenshot of current screen
+// NOTE: Provided fileName should not contain paths, saving to working directory
 void TakeScreenshot(const char *fileName)
 {
 #if defined(SUPPORT_MODULE_RTEXTURES)
@@ -1717,12 +1779,13 @@ void TakeScreenshot(const char *fileName)
     Image image = { imgData, (int)((float)CORE.Window.render.width*scale.x), (int)((float)CORE.Window.render.height*scale.y), 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
 
     char path[512] = { 0 };
-    strcpy(path, TextFormat("%s/%s", CORE.Storage.basePath, fileName));
-
+    strcpy(path, TextFormat("%s/%s", CORE.Storage.basePath, GetFileName(fileName)));
+    
     ExportImage(image, path);           // WARNING: Module required: rtextures
     RL_FREE(imgData);
 
-    TRACELOG(LOG_INFO, "SYSTEM: [%s] Screenshot taken successfully", path);
+    if (FileExists(path)) TRACELOG(LOG_INFO, "SYSTEM: [%s] Screenshot taken successfully", path);
+    else TRACELOG(LOG_WARNING, "SYSTEM: [%s] Screenshot could not be saved", path);
 #else
     TRACELOG(LOG_WARNING,"IMAGE: ExportImage() requires module: rtextures");
 #endif
@@ -1775,10 +1838,10 @@ bool IsFileExtension(const char *fileName, const char *ext)
     {
 #if defined(SUPPORT_MODULE_RTEXT) && defined(SUPPORT_TEXT_MANIPULATION)
         int extCount = 0;
-        const char **checkExts = TextSplit(ext, ';', &extCount);  // WARNING: Module required: rtext
+        const char **checkExts = TextSplit(ext, ';', &extCount); // WARNING: Module required: rtext
 
         char fileExtLower[MAX_FILE_EXTENSION_SIZE + 1] = { 0 };
-        strncpy(fileExtLower, TextToLower(fileExt), MAX_FILE_EXTENSION_SIZE);  // WARNING: Module required: rtext
+        strncpy(fileExtLower, TextToLower(fileExt), MAX_FILE_EXTENSION_SIZE); // WARNING: Module required: rtext
 
         for (int i = 0; i < extCount; i++)
         {
@@ -2463,7 +2526,7 @@ bool ExportAutomationEventList(AutomationEventList list, const char *fileName)
 
     // Add events data
     byteCount += sprintf(txtData + byteCount, "c %i\n", list.count);
-    for (int i = 0; i < list.count; i++)
+    for (unsigned int i = 0; i < list.count; i++)
     {
         byteCount += snprintf(txtData + byteCount, 256, "e %i %i %i %i %i %i // Event: %s\n", list.events[i].frame, list.events[i].type,
             list.events[i].params[0], list.events[i].params[1], list.events[i].params[2], list.events[i].params[3], autoEventTypeName[list.events[i].type]);
@@ -2520,7 +2583,19 @@ void PlayAutomationEvent(AutomationEvent event)
         {
             // Input event
             case INPUT_KEY_UP: CORE.Input.Keyboard.currentKeyState[event.params[0]] = false; break;             // param[0]: key
-            case INPUT_KEY_DOWN: CORE.Input.Keyboard.currentKeyState[event.params[0]] = true; break;            // param[0]: key
+            case INPUT_KEY_DOWN: {                                                                              // param[0]: key
+                CORE.Input.Keyboard.currentKeyState[event.params[0]] = true;
+
+                if (CORE.Input.Keyboard.previousKeyState[event.params[0]] == false)
+                {
+                    if (CORE.Input.Keyboard.keyPressedQueueCount < MAX_KEY_PRESSED_QUEUE)
+                    {
+                        // Add character to the queue
+                        CORE.Input.Keyboard.keyPressedQueue[CORE.Input.Keyboard.keyPressedQueueCount] = event.params[0];
+                        CORE.Input.Keyboard.keyPressedQueueCount++;
+                    }
+                }
+            } break;
             case INPUT_MOUSE_BUTTON_UP: CORE.Input.Mouse.currentButtonState[event.params[0]] = false; break;    // param[0]: key
             case INPUT_MOUSE_BUTTON_DOWN: CORE.Input.Mouse.currentButtonState[event.params[0]] = true; break;   // param[0]: key
             case INPUT_MOUSE_POSITION:      // param[0]: x, param[1]: y
@@ -2548,8 +2623,9 @@ void PlayAutomationEvent(AutomationEvent event)
             {
                 CORE.Input.Gamepad.axisState[event.params[0]][event.params[1]] = ((float)event.params[2]/32768.0f);
             } break;
+    #if defined(SUPPORT_GESTURES_SYSTEM)
             case INPUT_GESTURE: GESTURES.current = event.params[0]; break;     // param[0]: gesture (enum Gesture) -> rgestures.h: GESTURES.current
-
+    #endif
             // Window event
             case WINDOW_CLOSE: CORE.Window.shouldClose = true; break;
             case WINDOW_MAXIMIZE: MaximizeWindow(); break;
@@ -2557,11 +2633,13 @@ void PlayAutomationEvent(AutomationEvent event)
             case WINDOW_RESIZE: SetWindowSize(event.params[0], event.params[1]); break;
 
             // Custom event
+    #if defined(SUPPORT_SCREEN_CAPTURE)
             case ACTION_TAKE_SCREENSHOT:
             {
                 TakeScreenshot(TextFormat("screenshot%03i.png", screenshotCounter));
                 screenshotCounter++;
             } break;
+    #endif
             case ACTION_SETTARGETFPS: SetTargetFPS(event.params[0]); break;
             default: break;
         }
@@ -3108,7 +3186,11 @@ static void ScanDirectoryFiles(const char *basePath, FilePathList *files, const 
             if ((strcmp(dp->d_name, ".") != 0) &&
                 (strcmp(dp->d_name, "..") != 0))
             {
+            #if defined(_WIN32)
+                sprintf(path, "%s\\%s", basePath, dp->d_name);
+            #else
                 sprintf(path, "%s/%s", basePath, dp->d_name);
+            #endif
 
                 if (filter != NULL)
                 {
@@ -3147,7 +3229,11 @@ static void ScanDirectoryFilesRecursively(const char *basePath, FilePathList *fi
             if ((strcmp(dp->d_name, ".") != 0) && (strcmp(dp->d_name, "..") != 0))
             {
                 // Construct new path from our base path
+            #if defined(_WIN32)
+                sprintf(path, "%s\\%s", basePath, dp->d_name);
+            #else
                 sprintf(path, "%s/%s", basePath, dp->d_name);
+            #endif
 
                 if (IsPathFile(path))
                 {
@@ -3424,6 +3510,7 @@ static void RecordAutomationEvent(void)
     }
     //-------------------------------------------------------------------------------------
 
+#if defined(SUPPORT_GESTURES_SYSTEM)
     // Gestures input currentEventList->events recording
     //-------------------------------------------------------------------------------------
     if (GESTURES.current != GESTURE_NONE)
@@ -3441,6 +3528,7 @@ static void RecordAutomationEvent(void)
         if (currentEventList->count == currentEventList->capacity) return;    // Security check
     }
     //-------------------------------------------------------------------------------------
+#endif
 
     // Window events recording
     //-------------------------------------------------------------------------------------

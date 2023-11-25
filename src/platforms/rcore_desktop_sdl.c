@@ -5,8 +5,7 @@
 *   PLATFORM: DESKTOP: SDL
 *       - Windows (Win32, Win64)
 *       - Linux (X11/Wayland desktop mode)
-*       - FreeBSD, OpenBSD, NetBSD, DragonFly (X11 desktop)
-*       - OSX/macOS (x64, arm64)
+*       - Others (not tested)
 *
 *   LIMITATIONS:
 *       - Limitation 01
@@ -49,8 +48,14 @@
 *
 **********************************************************************************************/
 
-#include "SDL.h"            // SDL base library (window/rendered, input, timming... functionality)
-#include "SDL_opengl.h"     // SDL OpenGL functionality (if required, instead of internal renderer)
+#include "SDL.h"                // SDL base library (window/rendered, input, timming... functionality)
+
+#if defined(GRAPHICS_API_OPENGL_ES2)
+    // It seems it does not need to be included to work
+    //#include "SDL_opengles2.h"
+#else
+    #include "SDL_opengl.h"     // SDL OpenGL functionality (if required, instead of internal renderer)
+#endif
 
 //----------------------------------------------------------------------------------
 // Types and Structures Definition
@@ -74,7 +79,7 @@ static PlatformData platform = { 0 };   // Platform specific data
 //----------------------------------------------------------------------------------
 // Local Variables Definition
 //----------------------------------------------------------------------------------
-#define SCANCODE_MAPPED_NUM 100
+#define SCANCODE_MAPPED_NUM 232
 static const KeyboardKey ScancodeToKey[SCANCODE_MAPPED_NUM] = {
     KEY_NULL,           // SDL_SCANCODE_UNKNOWN
     0,
@@ -175,7 +180,28 @@ static const KeyboardKey ScancodeToKey[SCANCODE_MAPPED_NUM] = {
     KEY_KP_8,           // SDL_SCANCODE_KP_8
     KEY_KP_9,           // SDL_SCANCODE_KP_9
     KEY_KP_0,           // SDL_SCANCODE_KP_0
-    KEY_KP_DECIMAL      // SDL_SCANCODE_KP_PERIOD
+    KEY_KP_DECIMAL,     // SDL_SCANCODE_KP_PERIOD
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0,
+    KEY_LEFT_CONTROL,   //SDL_SCANCODE_LCTRL
+    KEY_LEFT_SHIFT,     //SDL_SCANCODE_LSHIFT
+    KEY_LEFT_ALT,       //SDL_SCANCODE_LALT
+    KEY_LEFT_SUPER,     //SDL_SCANCODE_LGUI
+    KEY_RIGHT_CONTROL,  //SDL_SCANCODE_RCTRL
+    KEY_RIGHT_SHIFT,    //SDL_SCANCODE_RSHIFT
+    KEY_RIGHT_ALT,      //SDL_SCANCODE_RALT
+    KEY_RIGHT_SUPER     //SDL_SCANCODE_RGUI
 };
 
 static const int CursorsLUT[] = {
@@ -964,6 +990,15 @@ void PollInputEvents(void)
     // so, if mouse is not moved it returns a (0, 0) position... this behaviour should be reviewed!
     //for (int i = 0; i < MAX_TOUCH_POINTS; i++) CORE.Input.Touch.position[i] = (Vector2){ 0, 0 };
 
+    // Map touch position to mouse position for convenience
+    // WARNING: If the target desktop device supports touch screen, this behavious should be reviewed!
+    // https://www.codeproject.com/Articles/668404/Programming-for-Multi-Touch
+    // https://docs.microsoft.com/en-us/windows/win32/wintouch/getting-started-with-multi-touch-messages
+    CORE.Input.Touch.position[0] = CORE.Input.Mouse.currentPosition;
+
+    int touchAction = -1;       // 0-TOUCH_ACTION_UP, 1-TOUCH_ACTION_DOWN, 2-TOUCH_ACTION_MOVE
+    bool gestureUpdate = false; // Flag to note gestures require to update
+
     // Register previous keys states
     // NOTE: Android supports up to 260 keys
     for (int i = 0; i < MAX_KEYBOARD_KEYS; i++)
@@ -1076,11 +1111,29 @@ void PollInputEvents(void)
             // Check mouse events
             case SDL_MOUSEBUTTONDOWN:
             {
-                CORE.Input.Mouse.currentButtonState[event.button.button - 1] = 1;
+                // NOTE: SDL2 mouse button order is LEFT, MIDDLE, RIGHT, but raylib uses LEFT, RIGHT, MIDDLE like GLFW
+                //       The following conditions align SDL with raylib.h MouseButton enum order
+                int btn = event.button.button - 1;
+                if (btn == 2) btn = 1;
+                else if (btn == 1) btn = 2;
+
+                CORE.Input.Mouse.currentButtonState[btn] = 1;
+
+                touchAction = 1;
+                gestureUpdate = true;
             } break;
             case SDL_MOUSEBUTTONUP:
             {
-                CORE.Input.Mouse.currentButtonState[event.button.button - 1] = 0;
+                // NOTE: SDL2 mouse button order is LEFT, MIDDLE, RIGHT, but raylib uses LEFT, RIGHT, MIDDLE like GLFW
+                //       The following conditions align SDL with raylib.h MouseButton enum order
+                int btn = event.button.button - 1;
+                if (btn == 2) btn = 1;
+                else if (btn == 1) btn = 2;
+
+                CORE.Input.Mouse.currentButtonState[btn] = 0;
+
+                touchAction = 0;
+                gestureUpdate = true;
             } break;
             case SDL_MOUSEWHEEL:
             {
@@ -1100,6 +1153,10 @@ void PollInputEvents(void)
                     CORE.Input.Mouse.currentPosition.x = (float)event.motion.x;
                     CORE.Input.Mouse.currentPosition.y = (float)event.motion.y;
                 }
+
+                CORE.Input.Touch.position[0] = CORE.Input.Mouse.currentPosition;
+                touchAction = 2;
+                gestureUpdate = true;
             } break;
 
             // Check gamepad events
@@ -1122,10 +1179,37 @@ void PollInputEvents(void)
             } break;
             default: break;
         }
+
+#if defined(SUPPORT_GESTURES_SYSTEM)
+        if (gestureUpdate)
+        {
+            // Process mouse events as touches to be able to use mouse-gestures
+            GestureEvent gestureEvent = { 0 };
+
+            // Register touch actions
+            gestureEvent.touchAction = touchAction;
+
+            // Assign a pointer ID
+            gestureEvent.pointId[0] = 0;
+
+            // Register touch points count
+            gestureEvent.pointCount = 1;
+
+            // Register touch points position, only one point registered
+            if (touchAction == 2) gestureEvent.position[0] = CORE.Input.Touch.position[0];
+            else gestureEvent.position[0] = GetMousePosition();
+
+            // Normalize gestureEvent.position[0] for CORE.Window.screen.width and CORE.Window.screen.height
+            gestureEvent.position[0].x /= (float)GetScreenWidth();
+            gestureEvent.position[0].y /= (float)GetScreenHeight();
+
+            // Gesture data is sent to gestures-system for processing
+            ProcessGestureEvent(gestureEvent);
+        }
+#endif
     }
     //-----------------------------------------------------------------------------
 }
-
 
 //----------------------------------------------------------------------------------
 // Module Internal Functions Definition

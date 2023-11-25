@@ -45,7 +45,9 @@
 *
 **********************************************************************************************/
 
-#include "GLFW/glfw3.h"                 // GLFW3: Windows, OpenGL context and Input management
+#define GLFW_INCLUDE_NONE       // Disable the standard OpenGL header inclusion on GLFW3
+                                // NOTE: Already provided by rlgl implementation (on glad.h)
+#include "GLFW/glfw3.h"         // GLFW3: Windows, OpenGL context and Input management
 
 #include <emscripten/emscripten.h>      // Emscripten functionality for C
 #include <emscripten/html5.h>           // Emscripten HTML5 library
@@ -92,7 +94,7 @@ static void ErrorCallback(int error, const char *description);                  
 // Window callbacks events
 static void WindowSizeCallback(GLFWwindow *window, int width, int height);          // GLFW3 WindowSize Callback, runs when window is resized
 static void WindowIconifyCallback(GLFWwindow *window, int iconified);               // GLFW3 WindowIconify Callback, runs when window is minimized/restored
-static void WindowMaximizeCallback(GLFWwindow *window, int maximized);              // GLFW3 Window Maximize Callback, runs when window is maximized
+//static void WindowMaximizeCallback(GLFWwindow *window, int maximized);              // GLFW3 Window Maximize Callback, runs when window is maximized
 static void WindowFocusCallback(GLFWwindow *window, int focused);                   // GLFW3 WindowFocus Callback, runs when window get/lose focus
 static void WindowDropCallback(GLFWwindow *window, int count, const char **paths);  // GLFW3 Window Drop Callback, runs when drop files into window
 
@@ -557,12 +559,11 @@ void PollInputEvents(void)
     // Reset keys/chars pressed registered
     CORE.Input.Keyboard.keyPressedQueueCount = 0;
     CORE.Input.Keyboard.charPressedQueueCount = 0;
-    // Reset key repeats
-    for (int i = 0; i < MAX_KEYBOARD_KEYS; i++) CORE.Input.Keyboard.keyRepeatInFrame[i] = 0;
 
     // Reset last gamepad button/axis registered state
     CORE.Input.Gamepad.lastButtonPressed = 0;       // GAMEPAD_BUTTON_UNKNOWN
     //CORE.Input.Gamepad.axisCount = 0;
+
     // Keyboard/Mouse input polling (automatically managed by GLFW3 through callback)
 
     // Register previous keys states
@@ -590,7 +591,6 @@ void PollInputEvents(void)
     // so, if mouse is not moved it returns a (0, 0) position... this behaviour should be reviewed!
     //for (int i = 0; i < MAX_TOUCH_POINTS; i++) CORE.Input.Touch.position[i] = (Vector2){ 0, 0 };
 
-    CORE.Window.resizedLastFrame = false;
 
     // Gamepad support using emscripten API
     // NOTE: GLFW3 joystick functionality not available in web
@@ -659,8 +659,13 @@ void PollInputEvents(void)
             CORE.Input.Gamepad.axisCount[i] = gamepadState.numAxes;
         }
     }
-}
 
+    CORE.Window.resizedLastFrame = false;
+
+    // TODO: This code does not seem to do anything??
+    //if (CORE.Window.eventWaiting) glfwWaitEvents();     // Wait for in input events before continue (drawing is paused)
+    //else glfwPollEvents(); // Poll input events: keyboard/mouse/window events (callbacks) --> WARNING: Where is key input reseted?
+}
 
 //----------------------------------------------------------------------------------
 // Module Internal Functions Definition
@@ -759,6 +764,7 @@ int InitPlatform(void)
     }
     else if (rlGetVersion() == RL_OPENGL_ES_30) // Request OpenGL ES 3.0 context
     {
+        // TODO: It seems WebGL 2.0 context is not set despite being requested
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
         glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
@@ -893,7 +899,6 @@ int InitPlatform(void)
 
     // If graphic device is no properly initialized, we end program
     if (!CORE.Window.ready) { TRACELOG(LOG_FATAL, "PLATFORM: Failed to initialize graphic device"); return -1; }
-    else SetWindowPosition(GetMonitorWidth(GetCurrentMonitor())/2 - CORE.Window.screen.width/2, GetMonitorHeight(GetCurrentMonitor())/2 - CORE.Window.screen.height/2);
 
     // Load OpenGL extensions
     // NOTE: GL procedures address loader is required to load extensions
@@ -997,11 +1002,13 @@ static void WindowIconifyCallback(GLFWwindow *window, int iconified)
     else CORE.Window.flags &= ~FLAG_WINDOW_MINIMIZED;           // The window was restored
 }
 
+/*
 // GLFW3 Window Maximize Callback, runs when window is maximized
 static void WindowMaximizeCallback(GLFWwindow *window, int maximized)
 {
     // TODO.
 }
+*/
 
 // GLFW3 WindowFocus Callback, runs when window get/lose focus
 static void WindowFocusCallback(GLFWwindow *window, int focused)
