@@ -7,6 +7,7 @@ Some people ported raylib to other languages in form of bindings or wrappers to 
 |  name              | raylib version  | language  | license    | repo                                                      |
 |:------------------:|:---------------:|:---------:|:----------:|-----------------------------------------------------------|
 | raylib             | **5.0** | [C/C++](https://en.wikipedia.org/wiki/C_(programming_language))    | Zlib | https://github.com/raysan5/raylib          |
+| raylib-beef        | **5.0** | [Beef](https://www.beeflang.org/)    | MIT | https://github.com/Starpelly/raylib-beef    |
 | raylib-boo         | 3.7     | [Boo](http://boo-language.github.io/)| MIT | https://github.com/Rabios/raylib-boo          |
 | Raylib-cs          | **4.5** | [C#](https://en.wikipedia.org/wiki/C_Sharp_(programming_language)) | Zlib | https://github.com/ChrisDill/Raylib-cs     |
 | Raylib-CsLo        | 4.2     | [C#](https://en.wikipedia.org/wiki/C_Sharp_(programming_language)) | MPL-2.0 | https://github.com/NotNotTech/Raylib-CsLo  |
@@ -15,7 +16,7 @@ Some people ported raylib to other languages in form of bindings or wrappers to 
 | claw-raylib        | **auto**    | [Common Lisp](https://common-lisp.net/)   | Apache-2.0 | https://github.com/bohonghuang/claw-raylib |
 | chez-raylib        | **auto** | [Chez Scheme](https://cisco.github.io/ChezScheme/) | GPLv3 | https://github.com/Yunoinsky/chez-raylib |
 | raylib-cr          | **4.6-dev (5e1a81)** | [Crystal](https://crystal-lang.org/)    | Apache-2.0 | https://github.com/sol-vin/raylib-cr |
-| ray-cyber          | 4.5     | [Cyber](https://cyberscript.dev)  | MIT | https://github.com/fubark/ray-cyber |
+| ray-cyber          | 5.0     | [Cyber](https://cyberscript.dev)  | MIT | https://github.com/fubark/ray-cyber |
 | raylib-c3          | **4.5** | [C3](https://c3-lang.org/)           | Zlib | https://github.com/Its-Kenta/Raylib-C3 |
 | dart-raylib        | 4.0     | [Dart](https://dart.dev/)               | MIT | https://gitlab.com/wolfenrain/dart-raylib   |
 | bindbc-raylib3     | **4.5**     | [D](https://dlang.org/)              | BSL-1.0 | https://github.com/o3o/bindbc-raylib3     |
@@ -24,7 +25,7 @@ Some people ported raylib to other languages in form of bindings or wrappers to 
 | dlang_raylib       | 4.0     | [D](https://dlang.org)                  | MPL-2.0 |https://github.com/rc-05/dlang_raylib          |
 | rayex              | 3.7     | [elixir](https://elixir-lang.org/)      | Apache-2.0 | https://github.com/shiryel/rayex     |
 | raylib-factor      | **4.5** | [Factor](https://factorcode.org/)        | BSD  | https://github.com/factor/factor/blob/master/extra/raylib/raylib.factor   |
-| raylib-freebasic   | **4.5** | [FreeBASIC](https://www.freebasic.net/) | MIT | https://github.com/WIITD/raylib-freebasic     |
+| raylib-freebasic   | **5.0** | [FreeBASIC](https://www.freebasic.net/) | MIT | https://github.com/WIITD/raylib-freebasic     |
 | fortran-raylib     | **4.5** | [Fortran](https://fortran-lang.org/) | ISC | https://github.com/interkosmos/fortran-raylib     |
 | raylib for Pascal  | **4.5** | [Object Pascal](https://en.wikipedia.org/wiki/Object_Pascal) | Modified Zlib | https://github.com/tinyBigGAMES/raylib |
 | raylib-go          | **5.0** | [Go](https://golang.org/)            | Zlib | https://github.com/gen2brain/raylib-go       |
