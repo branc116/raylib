@@ -19,7 +19,7 @@ Some people ported raylib to other languages in form of bindings or wrappers to 
 | ray-cyber          | 5.0     | [Cyber](https://cyberscript.dev)  | MIT | https://github.com/fubark/ray-cyber |
 | raylib-c3          | **4.5** | [C3](https://c3-lang.org/)           | Zlib | https://github.com/Its-Kenta/Raylib-C3 |
 | dart-raylib        | 4.0     | [Dart](https://dart.dev/)               | MIT | https://gitlab.com/wolfenrain/dart-raylib   |
-| bindbc-raylib3     | **4.5**     | [D](https://dlang.org/)              | BSL-1.0 | https://github.com/o3o/bindbc-raylib3     |
+| bindbc-raylib3     | **5.0**     | [D](https://dlang.org/)              | BSL-1.0 | https://github.com/o3o/bindbc-raylib3     |
 | dray               | 4.2     | [D](https://dlang.org/)              | Apache-2.0 | https://github.com/redthing1/dray          |
 | raylib-d           | **5.0** | [D](https://dlang.org/)              | Zlib | https://github.com/schveiguy/raylib-d        |
 | dlang_raylib       | 4.0     | [D](https://dlang.org)                  | MPL-2.0 |https://github.com/rc-05/dlang_raylib          |
@@ -85,6 +85,7 @@ Some people ported raylib to other languages in form of bindings or wrappers to 
 | raylib-raku        | **auto** | [Raku](https://www.raku.org/) | Artistic License 2.0 | https://github.com/vushu/raylib-raku |
 | Raylib.lean        | 4.5     | [Lean4](https://lean-lang.org/) | BSD-3-Clause | https://github.com/KislyjKisel/Raylib.lean |
 | Raylib-CSharp-Vinculum | 5.0 | [C#](https://en.wikipedia.org/wiki/C_Sharp_(programming_language)) | MPL-2.0 | https://github.com/ZeroElectric/Raylib-CSharp-Vinculum |
+| raylib-cobol | **auto** | [COBOL](https://gnucobol.sourceforge.io) | Public domain | https://codeberg.org/glowiak/raylib-cobol |
 
 ### Utility Wrapers
 These are utility wrappers for specific languages, they are not required to use raylib in the language but may adapt the raylib API to be more inline with the language's pardigm.
